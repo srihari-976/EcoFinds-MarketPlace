@@ -40,6 +40,7 @@ class ApiService {
     Object.entries(filters).forEach(([key, value]) => { if (value) params.append(key, value); });
     return this.request(`/products?${params.toString()}`);
   }
+  static async getProduct(id) { return this.request(`/products/${id}`); }
   static async createProduct(productData) { return this.request('/products', { method: 'POST', body: productData }); }
   static async createProductWithImageUrl(productData) { return this.request('/products/with-image-url', { method: 'POST', body: productData }); }
   static async bulkCreateProducts(products) { return this.request('/products/bulk-create', { method: 'POST', body: { products } }); }
@@ -94,7 +95,13 @@ const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  return <AuthContext.Provider value={{ user, login, register, logout, loading }}>{children}</AuthContext.Provider>;
+  const updateUser = (userData) => {
+    const updatedUser = { ...user, ...userData };
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
+  };
+
+  return <AuthContext.Provider value={{ user, login, register, logout, loading, updateUser }}>{children}</AuthContext.Provider>;
 };
 
 const LoadingSpinner = () => (
@@ -1068,7 +1075,7 @@ const MyListingsPage = () => {
   const loadProducts = async () => {
     try {
       const data = await ApiService.getProducts({ user_id: user.id });
-      setProducts(data);
+      setProducts(data.products || data);
     } catch (error) {
       console.error('Error loading products:', error);
     } finally {
@@ -1088,8 +1095,8 @@ const MyListingsPage = () => {
           await ApiService.createProduct(formData);
         } else if (formData.image_url) {
           await ApiService.createProductWithImageUrl(formData);
-      } else {
-        await ApiService.createProduct(formData);
+        } else {
+          await ApiService.createProduct(formData);
         }
       }
       setShowForm(false);
@@ -1767,7 +1774,7 @@ const ProductDetailPage = ({ productId, onBack }) => {
 };
 
 const ProfilePage = () => {
-  const { user, setUser } = useAuth();
+  const { user, updateUser } = useAuth();
   const [profile, setProfile] = useState({
     username: user?.username || '',
     email: user?.email || '',
@@ -1814,8 +1821,10 @@ const ProfilePage = () => {
         await ApiService.updateProfile(profileData);
       }
       
-      setUser({ ...user, ...profileData });
+      updateUser(profileData);
+      setProfile({ ...profile, ...profileData });
       alert('Profile updated successfully!');
+      setIsEditing(false);
     } catch (error) {
       alert('Error updating profile: ' + error.message);
     } finally {

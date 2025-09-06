@@ -28,11 +28,15 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
 app.use(helmet());
 app.use(compression());
 
-// Rate limiting
+// Rate limiting - more permissive for development
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs (increased for development)
-  message: 'Too many requests from this IP, please try again later.'
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  skip: (req) => {
+    // Skip rate limiting for development
+    return process.env.NODE_ENV === 'development';
+  }
 });
 app.use('/api/', limiter);
 
@@ -99,31 +103,58 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 // Function to download image from URL
 function downloadImage(url, filename) {
   return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const protocol = parsedUrl.protocol === 'https:' ? https : http;
-    
-    const file = fs.createWriteStream(path.join(UPLOAD_PATH, filename));
-    
-    protocol.get(url, (response) => {
-      if (response.statusCode !== 200) {
-        reject(new Error(`Failed to download image: ${response.statusCode}`));
-        return;
-      }
+    try {
+      const parsedUrl = new URL(url);
+      const protocol = parsedUrl.protocol === 'https:' ? https : http;
       
-      response.pipe(file);
+      const file = fs.createWriteStream(path.join(UPLOAD_PATH, filename));
       
-      file.on('finish', () => {
-        file.close();
-        resolve(filename);
+      const request = protocol.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      }, (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          file.close();
+          fs.unlink(path.join(UPLOAD_PATH, filename), () => {});
+          return downloadImage(response.headers.location, filename).then(resolve).catch(reject);
+        }
+        
+        if (response.statusCode !== 200) {
+          file.close();
+          fs.unlink(path.join(UPLOAD_PATH, filename), () => {});
+          reject(new Error(`Failed to download image: ${response.statusCode}`));
+          return;
+        }
+        
+        response.pipe(file);
+        
+        file.on('finish', () => {
+          file.close();
+          resolve(filename);
+        });
+        
+        file.on('error', (err) => {
+          fs.unlink(path.join(UPLOAD_PATH, filename), () => {});
+          reject(err);
+        });
       });
       
-      file.on('error', (err) => {
+      request.on('error', (err) => {
+        file.close();
         fs.unlink(path.join(UPLOAD_PATH, filename), () => {});
         reject(err);
       });
-    }).on('error', (err) => {
-      reject(err);
-    });
+      
+      request.setTimeout(10000, () => {
+        request.destroy();
+        file.close();
+        fs.unlink(path.join(UPLOAD_PATH, filename), () => {});
+        reject(new Error('Download timeout'));
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
@@ -1056,61 +1087,61 @@ app.get('/api/sample-images', (req, res) => {
     {
       id: 1,
       name: 'Electronics - Laptop',
-      url: 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=400&h=300&fit=crop',
+      url: '/uploads/laptop.jpg',
       category: 'Electronics & Gadgets'
     },
     {
       id: 2,
       name: 'Fashion - Jacket',
-      url: 'https://images.unsplash.com/photo-1551028719-00167b16eac5?w=400&h=300&fit=crop',
+      url: '/uploads/jacket.jpg',
       category: 'Fashion & Accessories'
     },
     {
       id: 3,
       name: 'Books - Collection',
-      url: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=400&h=300&fit=crop',
+      url: '/uploads/books.jpg',
       category: 'Books, Music & Hobbies'
     },
     {
       id: 4,
       name: 'Sports - Bicycle',
-      url: 'https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=400&h=300&fit=crop',
+      url: '/uploads/bike.jpg',
       category: 'Sports & Fitness'
     },
     {
       id: 5,
       name: 'Home - Chair',
-      url: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=300&fit=crop',
+      url: '/uploads/chair.jpg',
       category: 'Home & Furniture'
     },
     {
       id: 6,
-      name: 'Kids - Board Games',
-      url: 'https://images.unsplash.com/photo-1606092195730-5d7b9af1efc5?w=400&h=300&fit=crop',
+      name: 'Kids - Toys',
+      url: '/uploads/toys.jpg',
       category: 'Kids & Baby'
     },
     {
       id: 7,
       name: 'Electronics - Phone',
-      url: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&h=300&fit=crop',
+      url: '/uploads/phone.jpg',
       category: 'Electronics & Gadgets'
     },
     {
       id: 8,
       name: 'Fashion - Shoes',
-      url: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=400&h=300&fit=crop',
+      url: '/uploads/shoes.jpg',
       category: 'Fashion & Accessories'
     },
     {
       id: 9,
       name: 'Vehicle - Car',
-      url: 'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?w=400&h=300&fit=crop',
+      url: '/uploads/car.jpg',
       category: 'Vehicles'
     },
     {
       id: 10,
-      name: 'Appliances - Microwave',
-      url: 'https://images.unsplash.com/photo-1574269909862-7e1d70bb8078?w=400&h=300&fit=crop',
+      name: 'Appliances - Kitchen',
+      url: '/uploads/kitchen.jpg',
       category: 'Appliances'
     }
   ];
